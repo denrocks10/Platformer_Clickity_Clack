@@ -4,22 +4,58 @@
     <meta charset="UTF-8">
     <title>2D Platformer Game</title>
     <style>
-        canvas { border: 1px solid black; }
-        #ui { font-family: Arial, sans-serif; margin: 10px; }
-        #startButton, #pauseButton, #restartButton, #playAgainButton { padding: 10px 20px; font-size: 16px; cursor: pointer; margin-right: 10px; }
-        #pauseButton, #restartButton, #playAgainButton { display: none; }
+        canvas { 
+            border: 1px solid black; 
+            position: absolute; 
+            top: 60px; 
+            left: 0; 
+            z-index: 2; 
+            background: transparent; 
+        }
+        #ui { 
+            font-family: Arial, sans-serif; 
+            margin: 10px; 
+            position: relative; 
+            z-index: 3; 
+        }
+        #startButton, #pauseButton, #restartButton, #playAgainButton, 
+        #easyButton, #normalButton, #hardButton { 
+            padding: 10px 20px; 
+            font-size: 16px; 
+            cursor: pointer; 
+            margin-right: 10px; 
+        }
+        #pauseButton, #restartButton, #playAgainButton, 
+        #easyButton, #normalButton, #hardButton { 
+            display: none; 
+        }
+        #background { 
+            position: absolute; 
+            top: 60px; 
+            left: 0; 
+            width: 1200px; 
+            height: 600px; 
+            z-index: 1; 
+            background: 
+                url('ground_green.png') 0 0 / 24px 514px repeat-x, /* Top to mountains */
+                url('ground_mountains.png') var(--ground-mountains-offset, 0) 514px / 24px 50px repeat-x; /* Bottom at 564px */
+        }
     </style>
 </head>
 <body>
     <div id="ui">
         <span id="level">Level: 1</span> |
-        <span id="lives">Lives: 5</span> |
+        <span id="lives">Lives: -</span> |
         <span id="coins">Coins: 0</span>
         <button id="startButton">Start Game</button>
         <button id="pauseButton">Pause</button>
         <button id="restartButton">Restart</button>
         <button id="playAgainButton">Play Again</button>
+        <button id="easyButton">Easy</button>
+        <button id="normalButton">Normal</button>
+        <button id="hardButton">Hard</button>
     </div>
+    <div id="background"></div>
     <canvas id="gameCanvas" width="1200" height="600"></canvas>
 
     <script>
@@ -30,11 +66,15 @@
         const pauseButton = document.getElementById('pauseButton');
         const restartButton = document.getElementById('restartButton');
         const playAgainButton = document.getElementById('playAgainButton');
+        const easyButton = document.getElementById('easyButton');
+        const normalButton = document.getElementById('normalButton');
+        const hardButton = document.getElementById('hardButton');
         const levelDisplay = document.getElementById('level');
         const livesDisplay = document.getElementById('lives');
         const coinsDisplay = document.getElementById('coins');
+        const backgroundDiv = document.getElementById('background');
 
-        // Load images
+        // Load game images
         const playerImage = new Image(); playerImage.src = 'player.png';
         const walkerImage = new Image(); walkerImage.src = 'walker.png';
         const flyerImage = new Image(); flyerImage.src = 'flyer.png';
@@ -119,6 +159,7 @@
         let gameState = 'menu';
         let isPaused = false;
         let level = 1;
+        let difficulty = null;
         let transitionFrames = 0;
         let hasWonSoundPlayed = false;
         let backgroundMusic = null;
@@ -129,7 +170,7 @@
             height: 48, 
             baseSpeed: 5,
             speed: 5, 
-            lives: 5, 
+            lives: 0,
             moving: false, 
             targetX: null, 
             vy: 0, 
@@ -152,16 +193,50 @@
         let confetti = [];
         let coinCount = 0;
         let TOTAL_COINS = 0;
-        let bgOffset1 = 0;
-        let bgOffset2 = 0;
-        let cloudOffset = 0;
+        let groundMountainsOffset = 0;
         let coinSpinAngle = 0;
         let powerupFloatOffset = 0;
 
         // Event listeners
         startButton.addEventListener('click', () => {
-            gameState = 'playing';
+            gameState = 'difficulty';
             startButton.style.display = 'none';
+            easyButton.style.display = 'inline';
+            normalButton.style.display = 'inline';
+            hardButton.style.display = 'inline';
+        });
+
+        easyButton.addEventListener('click', () => {
+            difficulty = 'easy';
+            player.lives = 5;
+            gameState = 'playing';
+            easyButton.style.display = 'none';
+            normalButton.style.display = 'none';
+            hardButton.style.display = 'none';
+            pauseButton.style.display = 'inline';
+            resetGame();
+            backgroundMusic = playBackgroundMusic();
+        });
+
+        normalButton.addEventListener('click', () => {
+            difficulty = 'normal';
+            player.lives = 3;
+            gameState = 'playing';
+            easyButton.style.display = 'none';
+            normalButton.style.display = 'none';
+            hardButton.style.display = 'none';
+            pauseButton.style.display = 'inline';
+            resetGame();
+            backgroundMusic = playBackgroundMusic();
+        });
+
+        hardButton.addEventListener('click', () => {
+            difficulty = 'hard';
+            player.lives = 2;
+            gameState = 'playing';
+            easyButton.style.display = 'none';
+            normalButton.style.display = 'none';
+            hardButton.style.display = 'none';
             pauseButton.style.display = 'inline';
             resetGame();
             backgroundMusic = playBackgroundMusic();
@@ -194,16 +269,17 @@
         });
 
         playAgainButton.addEventListener('click', () => {
+            gameState = 'menu';
             level = 1;
-            resetGame();
-            gameState = 'playing';
+            difficulty = null;
+            player.lives = 0;
             playAgainButton.style.display = 'none';
-            pauseButton.style.display = 'inline';
+            startButton.style.display = 'inline';
             if (backgroundMusic) {
                 backgroundMusic.melody.stop();
                 backgroundMusic.harmony.stop();
+                backgroundMusic = null;
             }
-            backgroundMusic = playBackgroundMusic();
         });
 
         canvas.addEventListener('click', (e) => {
@@ -249,7 +325,7 @@
         }
 
         function update() {
-            if (gameState === 'menu') return;
+            if (gameState === 'menu' || gameState === 'difficulty') return;
 
             if (gameState === 'won') {
                 if (!hasWonSoundPlayed) {
@@ -283,6 +359,7 @@
                         level++;
                         resetGame();
                         gameState = 'playing';
+                        pauseButton.style.display = 'inline';
                     }
                 }
                 return;
@@ -292,6 +369,7 @@
                 if (transitionFrames <= 0) {
                     resetGame();
                     gameState = 'playing';
+                    pauseButton.style.display = 'inline';
                 }
                 return;
             }
@@ -412,13 +490,12 @@
                 }
             });
 
-            // Parallax background
-            bgOffset1 -= 0.5;
-            bgOffset2 -= 0.2;
-            cloudOffset -= 0.1;
-            if (bgOffset1 <= -1200) bgOffset1 = 0;
-            if (bgOffset2 <= -1200) bgOffset2 = 0;
-            if (cloudOffset <= -1200) cloudOffset = 0;
+            // Parallax background update (mountains move left, slower)
+            groundMountainsOffset -= 0.5; // Move left at 0.5 pixels per frame
+            if (groundMountainsOffset <= -24) groundMountainsOffset += 24; // Reset when it moves offscreen
+
+            // Update CSS custom property
+            backgroundDiv.style.setProperty('--ground-mountains-offset', `${groundMountainsOffset}px`);
 
             // Coin spin and power-up float animation
             coinSpinAngle += 0.1;
@@ -431,14 +508,15 @@
                 if (player.killerTimer === 0) {
                     spawnParticles(player.x + player.width / 2, player.y + player.height / 2);
                     playTone(200, 0.2, 'sawtooth');
+                    player.speed = player.baseSpeed;
                 }
             }
             if (player.speedTimer > 0) {
                 player.speedTimer--;
                 if (player.speedTimer === 0) {
-                    player.speed = player.baseSpeed;
                     spawnParticles(player.x + player.width / 2, player.y + player.height / 2, 'blue');
                     playTone(250, 0.2, 'sawtooth');
+                    player.speed = player.baseSpeed;
                 }
             }
 
@@ -532,20 +610,20 @@
                 return rock.y < GROUND_Y + 20;
             });
 
-            if (level === 3 && Math.random() < 0.02) {
+            if (level === 3 && Math.random() < (difficulty === 'easy' ? 0.01 : difficulty === 'normal' ? 0.02 : 0.03)) {
                 rocks.push({
                     x: Math.random() * 1160 + 20,
                     y: -20,
-                    vy: 3,
+                    vy: difficulty === 'easy' ? 2 : difficulty === 'normal' ? 3 : 4,
                     width: 36,
                     height: 36
                 });
             }
-            if (level === 5 && Math.random() < 0.01) {
+            if (level === 5 && Math.random() < (difficulty === 'easy' ? 0.005 : difficulty === 'normal' ? 0.01 : 0.015)) {
                 rocks.push({
                     x: Math.random() * 1160 + 20,
                     y: -20,
-                    vy: 3,
+                    vy: difficulty === 'easy' ? 2 : difficulty === 'normal' ? 3 : 4,
                     width: 36,
                     height: 36
                 });
@@ -571,32 +649,21 @@
         function draw() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-            // Draw sky
-            ctx.fillStyle = '#87CEEB';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-            // Draw clouds
-            drawClouds(cloudOffset);
-            drawClouds(cloudOffset + 1200);
-
-            // Draw parallax backgrounds with mountains
-            ctx.fillStyle = '#ADD8E6';
-            ctx.fillRect(bgOffset1, 0, 1200, 600);
-            ctx.fillRect(bgOffset1 + 1200, 0, 1200, 600);
-            ctx.fillStyle = '#87CEFA';
-            ctx.fillRect(bgOffset2, 0, 1200, 600);
-            ctx.fillRect(bgOffset2 + 1200, 0, 1200, 600);
-            ctx.fillStyle = '#2E8B57';
-            drawMountains(bgOffset1, GROUND_Y - GROUND_HEIGHT + 20, 200);
-            drawMountains(bgOffset1 + 1200, GROUND_Y - GROUND_HEIGHT + 20, 200);
-            ctx.fillStyle = '#3CB371';
-            drawMountains(bgOffset2, GROUND_Y - GROUND_HEIGHT + 20, 150);
-            drawMountains(bgOffset2 + 1200, GROUND_Y - GROUND_HEIGHT + 20, 150);
-
             if (gameState === 'menu') {
                 ctx.fillStyle = 'black';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = 'white';
                 ctx.font = '40px Arial';
                 ctx.fillText('Click Start Game to Begin', 400, 300);
+                return;
+            }
+
+            if (gameState === 'difficulty') {
+                ctx.fillStyle = 'black';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = 'white';
+                ctx.font = '40px Arial';
+                ctx.fillText('Select Difficulty', 480, 200);
                 return;
             }
 
@@ -639,7 +706,7 @@
                 return;
             }
 
-            // Draw ground
+            // Draw ground tiles
             if (groundImage.complete) {
                 for (let x = 0; x < canvas.width; x += 36) {
                     ctx.drawImage(groundImage, x, GROUND_Y - GROUND_HEIGHT, 36, 36);
@@ -851,152 +918,404 @@
         function transitionToNextLevel() {
             gameState = 'transitioning';
             transitionFrames = TRANSITION_DURATION;
+            player.speed = player.baseSpeed;
+            player.speedTimer = 0;
+            player.killerTimer = 0;
         }
 
         function resetGame() {
-            player = { 
-                x: 50, 
-                y: GROUND_Y - 48 - GROUND_HEIGHT, 
-                width: 48, 
-                height: 48, 
-                baseSpeed: 5,
-                speed: 5, 
-                lives: 5, 
-                moving: false, 
-                targetX: null, 
-                vy: 0, 
-                grounded: false,
-                hitTimer: 0,
-                killerTimer: 0,
-                speedTimer: 0,
-                jumpBuffer: 0,
-                hasJumped: false
-            };
-            if (level === 1) {
-                enemies = [
-                    { x: 200, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 2, type: 'walker' },
-                    { x: 650, y: 350, width: 48, height: 48, speed: 3, type: 'flyer', baseY: 350 }
-                ];
-                coins = [
-                    { x: 150, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
-                    { x: 250, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
-                    { x: 450, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
-                ];
-                spikes = [
-                    { x: 350, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
-                ];
-                boxes = [
-                    { x: 600, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36, broken: false }
-                ];
-                platforms = [];
-                powerups = [
-                    { x: 450, y: GROUND_Y - 108 - GROUND_HEIGHT, width: 72, height: 72, type: 'killer' }
-                ];
-                TOTAL_COINS = coins.length + boxes.filter(box => !box.broken).length; // 3 + 1 = 4
-            } else if (level === 2) {
-                enemies = [
-                    { x: 300, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 3, type: 'walker' },
-                    { x: 700, y: 320, width: 48, height: 48, speed: 4, type: 'flyer', baseY: 320 }
-                ];
-                coins = [
-                    { x: 200, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
-                    { x: 300, y: 408, width: 36, height: 36 }
-                ];
-                spikes = [
-                    { x: 450, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
-                ];
-                boxes = [
-                    { x: 400, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36, broken: false }
-                ];
-                platforms = [
-                    { x: 250, y: 426, width: 108, height: PLATFORM_HEIGHT }
-                ];
-                powerups = [
-                    { x: 300, y: 376, width: 32, height: 32, type: 'speed' }
-                ];
-                TOTAL_COINS = coins.length + boxes.filter(box => !box.broken).length; // 2 + 1 = 3
-            } else if (level === 3) {
-                enemies = [
-                    { x: 250, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 3, type: 'walker' },
-                    { x: 700, y: 400, width: 48, height: 48, speed: 0, type: 'shooter', shootTimer: 60 },
-                    { x: 900, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 2, type: 'jumper', jumpTimer: 30, vy: 0 }
-                ];
-                coins = [
-                    { x: 200, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
-                    { x: 350, y: 408, width: 36, height: 36 },
-                    { x: 650, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
-                ];
-                spikes = [
-                    { x: 400, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
-                ];
-                boxes = [
-                    { x: 450, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36, broken: false },
-                    { x: 800, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36, broken: false }
-                ];
-                platforms = [
-                    { x: 300, y: 426, width: 108, height: PLATFORM_HEIGHT }
-                ];
-                powerups = [
-                    { x: 650, y: GROUND_Y - 108 - GROUND_HEIGHT, width: 72, height: 72, type: 'killer' }
-                ];
-                TOTAL_COINS = coins.length + boxes.filter(box => !box.broken).length; // 3 + 2 = 5
-            } else if (level === 4) {
-                enemies = [
-                    { x: 200, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 3, type: 'walker' },
-                    { x: 750, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: -2, type: 'shooter', shootTimer: 60 },
-                    { x: 900, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 3, type: 'jumper', jumpTimer: 45, vy: 0 }
-                ];
-                coins = [
-                    { x: 150, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
-                    { x: 350, y: 408, width: 36, height: 36 },
-                    { x: 550, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
-                ];
-                spikes = [
-                    { x: 400, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
-                    { x: 600, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
-                ];
-                boxes = [
-                    { x: 450, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36, broken: false },
-                    { x: 850, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36, broken: false }
-                ];
-                platforms = [
-                    { x: 300, y: 426, width: 108, height: PLATFORM_HEIGHT }
-                ];
-                powerups = [
-                    { x: 350, y: 360, width: 32, height: 32, type: 'life' } // Reduced to 32x32
-                ];
-                TOTAL_COINS = coins.length + boxes.filter(box => !box.broken).length; // 3 + 2 = 5
-            } else if (level === 5) {
-                enemies = [
-                    { x: 200, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 2, type: 'walker' },
-                    { x: 350, y: 350, width: 48, height: 48, speed: 3, type: 'flyer', baseY: 350 },
-                    { x: 800, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 0, type: 'shooter', shootTimer: 90 },
-                    { x: 1000, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: -3, type: 'jumper', jumpTimer: 60, vy: 0 }
-                ];
-                coins = [
-                    { x: 150, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
-                    { x: 250, y: 408, width: 36, height: 36 },
-                    { x: 400, y: 328, width: 36, height: 36 },
-                    { x: 650, y: 248, width: 36, height: 36 }
-                ];
-                spikes = [
-                    { x: 300, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
-                    { x: 550, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
-                ];
-                boxes = [
-                    { x: 450, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36, broken: false },
-                    { x: 750, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36, broken: false }
-                ];
-                platforms = [
-                    { x: 200, y: 426, width: 108, height: PLATFORM_HEIGHT },
-                    { x: 350, y: 346, width: 144, height: PLATFORM_HEIGHT },
-                    { x: 600, y: 266, width: 108, height: PLATFORM_HEIGHT }
-                ];
-                powerups = [
-                    { x: 400, y: 300, width: 32, height: 32, type: 'speed' }
-                ];
-                TOTAL_COINS = coins.length + boxes.filter(box => !box.broken).length; // 4 + 2 = 6
+            player.x = 50;
+            player.y = GROUND_Y - 48 - GROUND_HEIGHT;
+            player.vy = 0;
+            player.grounded = false;
+            player.moving = false;
+            player.targetX = null;
+            player.hitTimer = 0;
+            player.killerTimer = 0;
+            player.speedTimer = 0;
+            player.speed = player.baseSpeed;
+            player.jumpBuffer = 0;
+            player.hasJumped = false;
+
+            if (difficulty === 'easy') {
+                player.lives = 5;
+                if (level === 1) {
+                    enemies = [
+                        { x: 200, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 1, type: 'walker' }
+                    ];
+                    coins = [
+                        { x: 150, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+                        { x: 250, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+                        { x: 450, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
+                    ];
+                    spikes = [];
+                    boxes = [
+                        { x: 600, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36, broken: false }
+                    ];
+                    platforms = [];
+                    powerups = [
+                        { x: 450, y: GROUND_Y - 108 - GROUND_HEIGHT, width: 72, height: 72, type: 'killer' }
+                    ];
+                    TOTAL_COINS = 4;
+                } else if (level === 2) {
+                    enemies = [
+                        { x: 300, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 2, type: 'walker' }
+                    ];
+                    coins = [
+                        { x: 200, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+                        { x: 300, y: 408, width: 36, height: 36 }
+                    ];
+                    spikes = [
+                        { x: 450, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
+                    ];
+                    boxes = [
+                        { x: 400, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36, broken: false }
+                    ];
+                    platforms = [
+                        { x: 250, y: 426, width: 108, height: PLATFORM_HEIGHT }
+                    ];
+                    powerups = [
+                        { x: 300, y: 376, width: 32, height: 32, type: 'speed' }
+                    ];
+                    TOTAL_COINS = 3;
+                } else if (level === 3) {
+                    enemies = [
+                        { x: 250, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 2, type: 'walker' },
+                        { x: 700, y: 400, width: 48, height: 48, speed: 0, type: 'shooter', shootTimer: 120 }
+                    ];
+                    coins = [
+                        { x: 200, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+                        { x: 350, y: 408, width: 36, height: 36 },
+                        { x: 650, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
+                    ];
+                    spikes = [];
+                    boxes = [
+                        { x: 450, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36, broken: false }
+                    ];
+                    platforms = [
+                        { x: 300, y: 426, width: 108, height: PLATFORM_HEIGHT }
+                    ];
+                    powerups = [
+                        { x: 650, y: GROUND_Y - 108 - GROUND_HEIGHT, width: 72, height: 72, type: 'killer' }
+                    ];
+                    TOTAL_COINS = 4;
+                } else if (level === 4) {
+                    enemies = [
+                        { x: 200, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 2, type: 'walker' },
+                        { x: 750, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: -1, type: 'shooter', shootTimer: 120 }
+                    ];
+                    coins = [
+                        { x: 150, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+                        { x: 350, y: 408, width: 36, height: 36 },
+                        { x: 550, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
+                    ];
+                    spikes = [
+                        { x: 400, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
+                    ];
+                    boxes = [
+                        { x: 450, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36, broken: false }
+                    ];
+                    platforms = [
+                        { x: 300, y: 426, width: 108, height: PLATFORM_HEIGHT }
+                    ];
+                    powerups = [
+                        { x: 350, y: 360, width: 32, height: 32, type: 'life' }
+                    ];
+                    TOTAL_COINS = 4;
+                } else if (level === 5) {
+                    enemies = [
+                        { x: 200, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 1, type: 'walker' },
+                        { x: 350, y: 350, width: 48, height: 48, speed: 2, type: 'flyer', baseY: 350 },
+                        { x: 800, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 0, type: 'shooter', shootTimer: 120 }
+                    ];
+                    coins = [
+                        { x: 150, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+                        { x: 250, y: 408, width: 36, height: 36 },
+                        { x: 400, y: 328, width: 36, height: 36 },
+                        { x: 650, y: 248, width: 36, height: 36 }
+                    ];
+                    spikes = [
+                        { x: 300, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
+                    ];
+                    boxes = [
+                        { x: 450, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36, broken: false }
+                    ];
+                    platforms = [
+                        { x: 200, y: 426, width: 108, height: PLATFORM_HEIGHT },
+                        { x: 350, y: 346, width: 144, height: PLATFORM_HEIGHT },
+                        { x: 600, y: 266, width: 108, height: PLATFORM_HEIGHT }
+                    ];
+                    powerups = [
+                        { x: 400, y: 300, width: 32, height: 32, type: 'speed' }
+                    ];
+                    TOTAL_COINS = 5;
+                }
+            } else if (difficulty === 'normal') {
+                player.lives = 3;
+                if (level === 1) {
+                    enemies = [
+                        { x: 200, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 2, type: 'walker' },
+                        { x: 650, y: 350, width: 48, height: 48, speed: 3, type: 'flyer', baseY: 350 }
+                    ];
+                    coins = [
+                        { x: 150, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+                        { x: 250, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+                        { x: 450, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
+                    ];
+                    spikes = [
+                        { x: 350, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
+                    ];
+                    boxes = [
+                        { x: 600, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36, broken: false }
+                    ];
+                    platforms = [];
+                    powerups = [
+                        { x: 450, y: GROUND_Y - 108 - GROUND_HEIGHT, width: 72, height: 72, type: 'killer' }
+                    ];
+                    TOTAL_COINS = 4;
+                } else if (level === 2) {
+                    enemies = [
+                        { x: 300, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 3, type: 'walker' },
+                        { x: 700, y: 320, width: 48, height: 48, speed: 4, type: 'flyer', baseY: 320 }
+                    ];
+                    coins = [
+                        { x: 200, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+                        { x: 300, y: 408, width: 36, height: 36 }
+                    ];
+                    spikes = [
+                        { x: 450, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
+                    ];
+                    boxes = [
+                        { x: 400, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36, broken: false }
+                    ];
+                    platforms = [
+                        { x: 250, y: 426, width: 108, height: PLATFORM_HEIGHT }
+                    ];
+                    powerups = [
+                        { x: 300, y: 376, width: 32, height: 32, type: 'speed' }
+                    ];
+                    TOTAL_COINS = 3;
+                } else if (level === 3) {
+                    enemies = [
+                        { x: 250, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 3, type: 'walker' },
+                        { x: 700, y: 400, width: 48, height: 48, speed: 0, type: 'shooter', shootTimer: 60 },
+                        { x: 900, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 2, type: 'jumper', jumpTimer: 30, vy: 0 }
+                    ];
+                    coins = [
+                        { x: 200, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+                        { x: 350, y: 408, width: 36, height: 36 },
+                        { x: 650, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
+                    ];
+                    spikes = [
+                        { x: 400, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
+                    ];
+                    boxes = [
+                        { x: 450, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36, broken: false },
+                        { x: 800, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36, broken: false }
+                    ];
+                    platforms = [
+                        { x: 300, y: 426, width: 108, height: PLATFORM_HEIGHT }
+                    ];
+                    powerups = [
+                        { x: 650, y: GROUND_Y - 108 - GROUND_HEIGHT, width: 72, height: 72, type: 'killer' }
+                    ];
+                    TOTAL_COINS = 5;
+                } else if (level === 4) {
+                    enemies = [
+                        { x: 200, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 3, type: 'walker' },
+                        { x: 750, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: -2, type: 'shooter', shootTimer: 60 },
+                        { x: 900, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 3, type: 'jumper', jumpTimer: 45, vy: 0 }
+                    ];
+                    coins = [
+                        { x: 150, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+                        { x: 350, y: 408, width: 36, height: 36 },
+                        { x: 550, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
+                    ];
+                    spikes = [
+                        { x: 400, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+                        { x: 600, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
+                    ];
+                    boxes = [
+                        { x: 450, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36, broken: false },
+                        { x: 850, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36, broken: false }
+                    ];
+                    platforms = [
+                        { x: 300, y: 426, width: 108, height: PLATFORM_HEIGHT }
+                    ];
+                    powerups = [
+                        { x: 350, y: 360, width: 32, height: 32, type: 'life' }
+                    ];
+                    TOTAL_COINS = 5;
+                } else if (level === 5) {
+                    enemies = [
+                        { x: 200, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 2, type: 'walker' },
+                        { x: 350, y: 350, width: 48, height: 48, speed: 3, type: 'flyer', baseY: 350 },
+                        { x: 800, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 0, type: 'shooter', shootTimer: 90 },
+                        { x: 1000, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: -3, type: 'jumper', jumpTimer: 60, vy: 0 }
+                    ];
+                    coins = [
+                        { x: 150, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+                        { x: 250, y: 408, width: 36, height: 36 },
+                        { x: 400, y: 328, width: 36, height: 36 },
+                        { x: 650, y: 248, width: 36, height: 36 }
+                    ];
+                    spikes = [
+                        { x: 300, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+                        { x: 550, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
+                    ];
+                    boxes = [
+                        { x: 450, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36, broken: false },
+                        { x: 750, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36, broken: false }
+                    ];
+                    platforms = [
+                        { x: 200, y: 426, width: 108, height: PLATFORM_HEIGHT },
+                        { x: 350, y: 346, width: 144, height: PLATFORM_HEIGHT },
+                        { x: 600, y: 266, width: 108, height: PLATFORM_HEIGHT }
+                    ];
+                    powerups = [
+                        { x: 400, y: 300, width: 32, height: 32, type: 'speed' }
+                    ];
+                    TOTAL_COINS = 6;
+                }
+            } else if (difficulty === 'hard') {
+                player.lives = 2;
+                if (level === 1) {
+                    enemies = [
+                        { x: 200, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 3, type: 'walker' },
+                        { x: 650, y: 350, width: 48, height: 48, speed: 4, type: 'flyer', baseY: 350 },
+                        { x: 400, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 2, type: 'jumper', jumpTimer: 60, vy: 0 }
+                    ];
+                    coins = [
+                        { x: 150, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+                        { x: 250, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+                        { x: 450, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
+                    ];
+                    spikes = [
+                        { x: 350, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+                        { x: 500, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
+                    ];
+                    boxes = [
+                        { x: 600, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36, broken: false }
+                    ];
+                    platforms = [];
+                    powerups = [
+                        { x: 450, y: GROUND_Y - 108 - GROUND_HEIGHT, width: 72, height: 72, type: 'killer' }
+                    ];
+                    TOTAL_COINS = 4;
+                } else if (level === 2) {
+                    enemies = [
+                        { x: 300, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 4, type: 'walker' },
+                        { x: 700, y: 320, width: 48, height: 48, speed: 5, type: 'flyer', baseY: 320 },
+                        { x: 500, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 0, type: 'shooter', shootTimer: 60 }
+                    ];
+                    coins = [
+                        { x: 200, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+                        { x: 300, y: 408, width: 36, height: 36 }
+                    ];
+                    spikes = [
+                        { x: 450, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+                        { x: 600, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
+                    ];
+                    boxes = [
+                        { x: 400, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36, broken: false }
+                    ];
+                    platforms = [
+                        { x: 250, y: 426, width: 108, height: PLATFORM_HEIGHT }
+                    ];
+                    powerups = [
+                        { x: 300, y: 376, width: 32, height: 32, type: 'speed' }
+                    ];
+                    TOTAL_COINS = 3;
+                } else if (level === 3) {
+                    enemies = [
+                        { x: 250, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 4, type: 'walker' },
+                        { x: 700, y: 400, width: 48, height: 48, speed: 0, type: 'shooter', shootTimer: 45 },
+                        { x: 900, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 3, type: 'jumper', jumpTimer: 30, vy: 0 },
+                        { x: 500, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 2, type: 'walker' }
+                    ];
+                    coins = [
+                        { x: 200, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+                        { x: 350, y: 408, width: 36, height: 36 },
+                        { x: 650, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
+                    ];
+                    spikes = [
+                        { x: 400, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+                        { x: 550, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
+                    ];
+                    boxes = [
+                        { x: 450, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36, broken: false },
+                        { x: 800, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36, broken: false }
+                    ];
+                    platforms = [
+                        { x: 300, y: 426, width: 108, height: PLATFORM_HEIGHT }
+                    ];
+                    powerups = [
+                        { x: 650, y: GROUND_Y - 108 - GROUND_HEIGHT, width: 72, height: 72, type: 'killer' }
+                    ];
+                    TOTAL_COINS = 5;
+                } else if (level === 4) {
+                    enemies = [
+                        { x: 200, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 4, type: 'walker' },
+                        { x: 750, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: -3, type: 'shooter', shootTimer: 45 },
+                        { x: 900, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 4, type: 'jumper', jumpTimer: 45, vy: 0 },
+                        { x: 600, y: 350, width: 48, height: 48, speed: 4, type: 'flyer', baseY: 350 }
+                    ];
+                    coins = [
+                        { x: 150, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+                        { x: 350, y: 408, width: 36, height: 36 },
+                        { x: 550, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
+                    ];
+                    spikes = [
+                        { x: 400, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+                        { x: 600, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+                        { x: 700, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
+                    ];
+                    boxes = [
+                        { x: 450, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36, broken: false },
+                        { x: 850, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36, broken: false }
+                    ];
+                    platforms = [
+                        { x: 300, y: 426, width: 108, height: PLATFORM_HEIGHT }
+                    ];
+                    powerups = [
+                        { x: 350, y: 360, width: 32, height: 32, type: 'life' }
+                    ];
+                    TOTAL_COINS = 5;
+                } else if (level === 5) {
+                    enemies = [
+                        { x: 200, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 3, type: 'walker' },
+                        { x: 350, y: 350, width: 48, height: 48, speed: 4, type: 'flyer', baseY: 350 },
+                        { x: 800, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 0, type: 'shooter', shootTimer: 60 },
+                        { x: 1000, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: -4, type: 'jumper', jumpTimer: 45, vy: 0 },
+                        { x: 500, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 3, type: 'walker' }
+                    ];
+                    coins = [
+                        { x: 150, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+                        { x: 250, y: 408, width: 36, height: 36 },
+                        { x: 400, y: 328, width: 36, height: 36 },
+                        { x: 650, y: 248, width: 36, height: 36 }
+                    ];
+                    spikes = [
+                        { x: 300, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+                        { x: 550, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+                        { x: 700, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
+                    ];
+                    boxes = [
+                        { x: 450, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36, broken: false },
+                        { x: 750, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36, broken: false }
+                    ];
+                    platforms = [
+                        { x: 200, y: 426, width: 108, height: PLATFORM_HEIGHT },
+                        { x: 350, y: 346, width: 144, height: PLATFORM_HEIGHT },
+                        { x: 600, y: 266, width: 108, height: PLATFORM_HEIGHT }
+                    ];
+                    powerups = [
+                        { x: 400, y: 300, width: 32, height: 32, type: 'speed' }
+                    ];
+                    TOTAL_COINS = 6;
+                }
             }
+
             coinCount = 0;
             transitionFrames = 0;
             hasWonSoundPlayed = false;
@@ -1010,38 +1329,6 @@
             isPaused = false;
             pauseButton.textContent = 'Pause';
             pauseButton.style.display = gameState === 'playing' ? 'inline' : 'none';
-        }
-
-        // Draw functions
-        function drawMountains(offset, baseY, height) {
-            ctx.beginPath();
-            ctx.moveTo(offset - 200, baseY);
-            ctx.lineTo(offset + 100, baseY - height);
-            ctx.lineTo(offset + 400, baseY);
-            ctx.lineTo(offset + 700, baseY - height * 0.8);
-            ctx.lineTo(offset + 1000, baseY);
-            ctx.lineTo(offset + 1300, baseY - height * 0.6);
-            ctx.lineTo(offset + 1600, baseY);
-            ctx.fill();
-        }
-
-        function drawClouds(offset) {
-            ctx.fillStyle = 'white';
-            ctx.beginPath();
-            ctx.ellipse(offset + 200, 100, 60, 40, 0, 0, Math.PI * 2);
-            ctx.ellipse(offset + 260, 120, 70, 50, 0, 0, Math.PI * 2);
-            ctx.ellipse(offset + 320, 100, 60, 40, 0, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.beginPath();
-            ctx.ellipse(offset + 600, 150, 50, 30, 0, 0, Math.PI * 2);
-            ctx.ellipse(offset + 650, 170, 60, 40, 0, 0, Math.PI * 2);
-            ctx.ellipse(offset + 700, 150, 50, 30, 0, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.beginPath();
-            ctx.ellipse(offset + 1000, 80, 70, 50, 0, 0, Math.PI * 2);
-            ctx.ellipse(offset + 1070, 100, 80, 60, 0, 0, Math.PI * 2);
-            ctx.ellipse(offset + 1140, 80, 70, 50, 0, 0, Math.PI * 2);
-            ctx.fill();
         }
 
         // Start the game loop
