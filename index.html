@@ -75,11 +75,15 @@
         const backgroundDiv = document.getElementById('background');
 
         // Load game images
-        const playerImage = new Image(); playerImage.src = 'player.png';
-        const walkerImage = new Image(); walkerImage.src = 'walker.png';
-        const flyerImage = new Image(); flyerImage.src = 'flyer.png';
+        const playerIdleImage = new Image(); playerIdleImage.src = 'player.png';
+        const playerMoveImage = new Image(); playerMoveImage.src = 'player_move.png';
+        const walkerIdleImage = new Image(); walkerIdleImage.src = 'walker.png';
+        const walkerMoveImage = new Image(); walkerMoveImage.src = 'walker_move.png';
+        const flyerIdleImage = new Image(); flyerIdleImage.src = 'flyer.png';
+        const flyerMoveImage = new Image(); flyerMoveImage.src = 'flyer_move.png';
         const shooterImage = new Image(); shooterImage.src = 'shooter.png';
-        const jumperImage = new Image(); jumperImage.src = 'jumper.png';
+        const jumperIdleImage = new Image(); jumperIdleImage.src = 'jumper.png';
+        const jumperMoveImage = new Image(); jumperMoveImage.src = 'jumper_move.png';
         const coinImage = new Image(); coinImage.src = 'coin.png';
         const boxImage = new Image(); boxImage.src = 'box.png';
         const spikeImage = new Image(); spikeImage.src = 'spike.png';
@@ -89,6 +93,11 @@
         const killerPowerImage = new Image(); killerPowerImage.src = 'killer.png';
         const lifePowerImage = new Image(); lifePowerImage.src = 'life.png';
         const speedPowerImage = new Image(); speedPowerImage.src = 'fast.png';
+		const lockedDoorImage = new Image(); lockedDoorImage.src = 'locked_door.png';
+		const keyImage = new Image(); keyImage.src = 'key.png';
+		const bigCoinImage = new Image(); bigCoinImage.src = 'big_coin.png';
+		const bossIdleImage = new Image(); bossIdleImage.src = 'boss_idle.png';
+		const bossMoveImage = new Image(); bossMoveImage.src = 'boss_move.png';
 
         // Constants
         const GRAVITY = 0.5;
@@ -99,6 +108,7 @@
         const KILLER_DURATION = 600;
         const SPEED_DURATION = 600;
         const JUMP_BUFFER_FRAMES = 10;
+        const ANIMATION_SPEED = 10;
 
         // Audio setup
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -163,6 +173,7 @@
         let transitionFrames = 0;
         let hasWonSoundPlayed = false;
         let backgroundMusic = null;
+        let animationFrame = 0;
         let player = { 
             x: 50, 
             y: GROUND_Y - 48 - GROUND_HEIGHT, 
@@ -179,7 +190,11 @@
             killerTimer: 0,
             speedTimer: 0,
             jumpBuffer: 0,
-            hasJumped: false
+            hasJumped: false,
+            movingLeft: false,
+            movingRight: false,
+            facingRight: true,
+			keyCount: 0
         };
         let enemies = [];
         let coins = [];
@@ -187,6 +202,8 @@
         let boxes = [];
         let platforms = [];
         let powerups = [];
+		let lockedDoors = [];
+		let keys = [];
         let particles = [];
         let projectiles = [];
         let rocks = [];
@@ -196,6 +213,11 @@
         let groundMountainsOffset = 0;
         let coinSpinAngle = 0;
         let powerupFloatOffset = 0;
+		let boss = null; // Will hold boss object
+		let bossHitTimer = 0; // For hit effect
+		let powerupSpawnTimer = 0; // Timer for killer power-up spawn
+		let bossInvulnTimer = 0; // Timer for boss invulnerability after hit
+		let coinSpawnDelay = 0; // Delay timer for coin spawn after boss death
 
         // Event listeners
         startButton.addEventListener('click', () => {
@@ -210,6 +232,7 @@
             difficulty = 'easy';
             player.lives = 5;
             gameState = 'playing';
+			level = 10; // Add this line
             easyButton.style.display = 'none';
             normalButton.style.display = 'none';
             hardButton.style.display = 'none';
@@ -222,6 +245,7 @@
             difficulty = 'normal';
             player.lives = 3;
             gameState = 'playing';
+			level = 10; // Add this line
             easyButton.style.display = 'none';
             normalButton.style.display = 'none';
             hardButton.style.display = 'none';
@@ -234,6 +258,7 @@
             difficulty = 'hard';
             player.lives = 2;
             gameState = 'playing';
+			level = 10; // Add this line
             easyButton.style.display = 'none';
             normalButton.style.display = 'none';
             hardButton.style.display = 'none';
@@ -293,7 +318,17 @@
                 if (!box.broken && clickX > box.x && clickX < box.x + box.width && 
                     clickY > box.y && clickY < box.y + box.height) {
                     box.broken = true;
-                    spawnItem(box.x + box.width / 2 - 18, box.y + box.height / 2 - 18);
+					if (level === 10) {
+						// Spawn killer power-up instead of coin on Level 10
+						powerups.push({
+							x: box.x + box.width / 2 - 36,
+							y: box.y + box.height / 2 - 36,
+							width: 72, height: 72,
+							type: 'killer'
+						});
+					} else {
+						spawnItem(box.x + box.width / 2 - 18, box.y + box.height / 2 - 18); // Coin for other levels
+					}
                     spawnParticles(box.x + box.width / 2, box.y + box.height / 2);
                     playTone(300, 0.1, 'square', 0.3);
                     boxClicked = true;
@@ -314,6 +349,47 @@
                 player.jumpBuffer = 0;
                 player.hasJumped = true;
                 playTone(400, 0.1);
+            }
+        });
+
+        // Keyboard controls
+        document.addEventListener('keydown', (e) => {
+            if (gameState !== 'playing' || isPaused) return;
+            switch (e.key) {
+                case 'ArrowLeft':
+                    player.movingLeft = true;
+                    player.moving = false;
+                    player.targetX = null;
+                    player.facingRight = false;
+                    break;
+                case 'ArrowRight':
+                    player.movingRight = true;
+                    player.moving = false;
+                    player.targetX = null;
+                    player.facingRight = true;
+                    break;
+                case ' ':
+                    if (player.grounded || (player.jumpBuffer > 0 && !player.hasJumped)) {
+                        player.vy = -15;
+                        player.grounded = false;
+                        player.jumpBuffer = 0;
+                        player.hasJumped = true;
+                        playTone(400, 0.1);
+                    }
+                    e.preventDefault();
+                    break;
+            }
+        });
+
+        document.addEventListener('keyup', (e) => {
+            if (gameState !== 'playing' || isPaused) return;
+            switch (e.key) {
+                case 'ArrowLeft':
+                    player.movingLeft = false;
+                    break;
+                case 'ArrowRight':
+                    player.movingRight = false;
+                    break;
             }
         });
 
@@ -355,7 +431,7 @@
             if (gameState === 'transitioning') {
                 transitionFrames--;
                 if (transitionFrames <= 0) {
-                    if (level < 5) {
+                    if (level < 10) {
                         level++;
                         resetGame();
                         gameState = 'playing';
@@ -375,8 +451,41 @@
             }
 
             // Player movement
-            if (player.moving && player.targetX !== null) {
-                let targetSpeed = player.x < player.targetX ? player.speed : -player.speed;
+            let targetSpeed = 0;
+            if (player.movingLeft) targetSpeed -= player.speed;
+            if (player.movingRight) targetSpeed += player.speed;
+
+            if (targetSpeed !== 0) {
+                let nextX = player.x + targetSpeed;
+                let collisionDetected = false;
+
+                boxes.forEach(box => {
+                    if (!box.broken && collides({ x: nextX, y: player.y, width: player.width, height: player.height }, box)) {
+                        if (player.x < box.x) {
+                            player.x = box.x - player.width;
+                        } else {
+                            player.x = box.x + box.width;
+                        }
+                        collisionDetected = true;
+                    }
+                });
+				
+				lockedDoors.forEach(door => {
+					if (collides({ x: nextX, y: player.y, width: player.width, height: player.height }, door)) {
+						if (player.x < door.x) {
+							player.x = door.x - player.width;
+						} else {
+							player.x = door.x + door.width;
+						}
+						collisionDetected = true;
+					}
+				});
+
+                if (!collisionDetected && nextX >= 0 && nextX + player.width <= canvas.width) {
+                    player.x = nextX;
+                }
+            } else if (player.moving && player.targetX !== null) {
+                targetSpeed = player.x < player.targetX ? player.speed : -player.speed;
                 let nextX = player.x + targetSpeed;
                 let collisionDetected = false;
 
@@ -392,15 +501,36 @@
                         collisionDetected = true;
                     }
                 });
+				
+				lockedDoors.forEach(door => {
+					if (collides({ x: nextX, y: player.y, width: player.width, height: player.height }, door)) {
+						if (player.x < door.x) {
+							player.x = door.x - player.width;
+						} else {
+							player.x = door.x + door.width;
+						}
+						player.moving = false;
+						player.targetX = null;
+						collisionDetected = true;
+					}
+				});
 
                 if (!collisionDetected) {
                     if (Math.abs(player.x - player.targetX) > player.speed) {
                         player.x += targetSpeed;
+                        player.facingRight = player.x < player.targetX;
                     } else {
                         player.x = player.targetX;
                         player.moving = false;
                     }
                 }
+            }
+
+            // Player animation
+            if (player.moving || player.movingLeft || player.movingRight) {
+                animationFrame++;
+            } else {
+                animationFrame = 0;
             }
 
             // Player gravity and jumping
@@ -439,22 +569,56 @@
                     player.hasJumped = false;
                 }
             });
+			
+			lockedDoors.forEach(door => {
+				if (collides(player, door) && player.vy >= 0 && 
+					player.y + player.height - player.vy <= door.y) {
+					player.y = door.y - player.height;
+					player.vy = 0;
+					player.grounded = true;
+					player.hasJumped = false;
+				}
+			});
 
-            // Enemy movement
+            // Enemy movement and animation
             enemies.forEach(enemy => {
                 if (enemy.type === 'walker') {
-                    enemy.x += enemy.speed;
+                    let nextX = enemy.x + enemy.speed;
+                    let collisionDetected = false;
+
                     boxes.forEach(box => {
-                        if (!box.broken && collides(enemy, box)) {
+                        if (!box.broken && collides({ x: nextX, y: enemy.y, width: enemy.width, height: enemy.height }, box)) {
                             if (enemy.x < box.x) enemy.speed = -Math.abs(enemy.speed);
                             else enemy.speed = Math.abs(enemy.speed);
+                            collisionDetected = true;
                         }
                     });
-                    if (enemy.x < 50 || enemy.x + enemy.width > 1150) enemy.speed *= -1;
+					
+					lockedDoors.forEach(door => {
+						if (collides({ x: nextX, y: enemy.y, width: enemy.width, height: enemy.height }, door)) {
+							if (enemy.x < door.x) enemy.speed = -Math.abs(enemy.speed);
+							else enemy.speed = Math.abs(enemy.speed);
+							collisionDetected = true;
+						}
+					});
+
+                    if (enemy.x < 50 || enemy.x + enemy.width > 1150) {
+                        enemy.speed *= -1;
+                    }
+
+                    if (!collisionDetected) {
+                        enemy.x += enemy.speed;
+                    }
+                    enemy.facingRight = enemy.speed > 0;
+                    enemy.animationFrame = (enemy.animationFrame || 0) + 1;
+
                 } else if (enemy.type === 'flyer') {
                     enemy.x += enemy.speed;
                     enemy.y = enemy.baseY + Math.sin(enemy.x * 0.02) * 50;
                     if (enemy.x > 1200) enemy.x = -enemy.width;
+                    enemy.facingRight = enemy.speed > 0;
+                    enemy.animationFrame = (enemy.animationFrame || 0) + 1;
+
                 } else if (enemy.type === 'shooter') {
                     enemy.shootTimer--;
                     if (enemy.shootTimer <= 0) {
@@ -467,8 +631,35 @@
                         });
                         enemy.shootTimer = 90;
                     }
+
                 } else if (enemy.type === 'jumper') {
-                    enemy.x += enemy.speed;
+                    let nextX = enemy.x + enemy.speed;
+                    let collisionDetected = false;
+
+                    boxes.forEach(box => {
+                        if (!box.broken && collides({ x: nextX, y: enemy.y, width: enemy.width, height: enemy.height }, box)) {
+                            if (enemy.x < box.x) enemy.speed = -Math.abs(enemy.speed);
+                            else enemy.speed = Math.abs(enemy.speed);
+                            collisionDetected = true;
+                        }
+                    });
+					
+					lockedDoors.forEach(door => {
+						if (collides({ x: nextX, y: enemy.y, width: enemy.width, height: enemy.height }, door)) {
+							if (enemy.x < door.x) enemy.speed = -Math.abs(enemy.speed);
+							else enemy.speed = Math.abs(enemy.speed);
+							collisionDetected = true;
+						}
+					});
+
+                    if (enemy.x < 50 || enemy.x + enemy.width > 1150) {
+                        enemy.speed *= -1;
+                    }
+
+                    if (!collisionDetected) {
+                        enemy.x += enemy.speed;
+                    }
+
                     if (enemy.jumpTimer <= 0) {
                         enemy.vy = -10;
                         enemy.jumpTimer = 60;
@@ -480,21 +671,46 @@
                         enemy.vy = 0;
                     }
                     enemy.jumpTimer--;
-                    boxes.forEach(box => {
-                        if (!box.broken && collides(enemy, box)) {
-                            if (enemy.x < box.x) enemy.speed = -Math.abs(enemy.speed);
-                            else enemy.speed = Math.abs(enemy.speed);
-                        }
-                    });
-                    if (enemy.x < 50 || enemy.x + enemy.width > 1150) enemy.speed *= -1;
-                }
+                    enemy.facingRight = enemy.speed > 0;
+                    enemy.animationFrame = (enemy.animationFrame || 0) + 1;
+				} else if (enemy.type === 'boss') {
+					// Horizontal movement
+					enemy.x += enemy.speed;
+					if (enemy.x < 50 || enemy.x + enemy.width > 1150) {
+						enemy.speed *= -1; // Reverse direction at screen edges
+					}
+
+					// Random jumping
+					if (enemy.jumpTimer <= 0) {
+						enemy.vy = -15; // Increased jump height (was -12)
+						const targetPlatform = platforms[Math.floor(Math.random() * 3)]; // Random platform
+						enemy.speed = (targetPlatform.x + targetPlatform.width / 2 - enemy.x - enemy.width / 2) > 0 ? 3 : -3; // Move toward platform
+						enemy.jumpTimer = Math.floor(Math.random() * 60) + 60; // Random 60-120 frames
+					}
+					enemy.vy += GRAVITY;
+					enemy.y += enemy.vy;
+					// Land on platforms or ground
+					let landed = false;
+					platforms.forEach(platform => {
+						if (collides(enemy, platform) && enemy.vy >= 0 && enemy.y + enemy.height - enemy.vy <= platform.y) {
+							enemy.y = platform.y - enemy.height;
+							enemy.vy = 0;
+							landed = true;
+						}
+					});
+					if (!landed && enemy.y + enemy.height > GROUND_Y - GROUND_HEIGHT) {
+						enemy.y = GROUND_Y - GROUND_HEIGHT - enemy.height;
+						enemy.vy = 0;
+					}
+					enemy.jumpTimer--;
+					enemy.facingRight = enemy.speed > 0;
+					enemy.animationFrame = (enemy.animationFrame || 0) + 1;
+				}
             });
 
-            // Parallax background update (mountains move left, slower)
-            groundMountainsOffset -= 0.5; // Move left at 0.5 pixels per frame
-            if (groundMountainsOffset <= -24) groundMountainsOffset += 24; // Reset when it moves offscreen
-
-            // Update CSS custom property
+            // Parallax background update
+            groundMountainsOffset -= 0.5;
+            if (groundMountainsOffset <= -24) groundMountainsOffset += 24;
             backgroundDiv.style.setProperty('--ground-mountains-offset', `${groundMountainsOffset}px`);
 
             // Coin spin and power-up float animation
@@ -530,22 +746,51 @@
                 }
             });
 
-            enemies = enemies.filter(enemy => {
-                if (collides(player, enemy) && player.lives > 0) {
-                    if (player.killerTimer > 0) {
-                        spawnParticles(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2);
-                        playTone(500, 0.1, 'square');
-                        return false;
-                    } else if (player.hitTimer === 0) {
-                        player.lives--;
-                        player.hitTimer = 60;
-                        livesDisplay.textContent = `Lives: ${player.lives}`;
-                        playTone(100, 0.2, 'square', 0.5);
-                        if (player.lives <= 0) endGame();
-                    }
-                }
-                return true;
-            });
+			enemies = enemies.filter(enemy => {
+				if (collides(player, enemy) && player.lives > 0) {
+					if (player.killerTimer > 0) {
+						if (enemy.type === 'boss') {
+							if (bossInvulnTimer <= 0) { // Only damage if not invulnerable
+								enemy.hp--;
+								bossHitTimer = 10; // Flash for 10 frames
+								bossInvulnTimer = 30; // Set invulnerability for 30 frames (0.5 seconds)
+								spawnParticles(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2, 'red');
+								playTone(500, 0.1, 'square');
+								if (enemy.hp <= 0) {
+									coinSpawnDelay = 180; // Set 3-second delay (180 frames)
+									console.log("Boss defeated, coin delay set to 180"); // Debug log
+									return false; // Remove boss
+								}
+							}
+							return true; // Keep boss alive, no player damage
+						} else {
+							spawnParticles(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2);
+							playTone(500, 0.1, 'square');
+							return false; // Non-boss enemies die instantly
+						}
+					} else if (player.hitTimer === 0) {
+						player.lives--;
+						player.hitTimer = 60;
+						livesDisplay.textContent = `Lives: ${player.lives}`;
+						playTone(100, 0.2, 'square', 0.5);
+						if (player.lives <= 0) endGame();
+					}
+				}
+				return true;
+			});
+			
+			// Spawn big coin after delay on center platform
+			if (level === 10 && coinSpawnDelay > 0) {
+				coinSpawnDelay--;
+				if (coinSpawnDelay <= 0) {
+					coins.push({
+						x: 546 + 108 / 2 - 36, // Center of middle platform (x: 546, width: 108)
+						y: 346 - 72, // Top of middle platform (y: 346, height: 72)
+						width: 72, height: 72,
+						isBig: true
+					});
+				}
+			}
 
             coins = coins.filter(coin => {
                 if (collides(player, coin)) {
@@ -583,19 +828,98 @@
                 }
                 return true;
             });
+			
+			keys = keys.filter(key => {
+				if (collides(player, key)) {
+					player.keyCount++;
+					playSweep(700, 900, 0.1);
+					spawnParticles(key.x + key.width / 2, key.y + key.height / 2, 'gold');
+					
+					if (level === 8) {
+						if (player.keyCount === 1) {
+							lockedDoors = lockedDoors.filter(door => 
+								!(door.x === 714 && door.y === GROUND_Y - 36 - GROUND_HEIGHT) &&
+								!(door.x === 750 && door.y === GROUND_Y - 72 - GROUND_HEIGHT) &&
+								!(door.x === 786 && door.y === GROUND_Y - 36 - GROUND_HEIGHT)
+							);
+						} else if (player.keyCount === 2) {
+							lockedDoors = lockedDoors.filter(door => 
+								!(door.x === 1014 && door.y === 230) &&
+								!(door.x === 1050 && door.y === 194) &&
+								!(door.x === 1086 && door.y === 230)
+							);
+						}
+					} else if (level === 9) {
+						if (difficulty === 'easy' && player.keyCount === 1) {
+							lockedDoors = lockedDoors.filter(door => 
+								!(door.x === 1014 && door.y === 230) &&
+								!(door.x === 1050 && door.y === 194) &&
+								!(door.x === 1086 && door.y === 230)
+							);
+						} else if (difficulty === 'normal') {
+							if (player.keyCount === 1) {
+								lockedDoors = lockedDoors.filter(door => 
+									!(door.x === 714 && door.y === GROUND_Y - 72 - GROUND_HEIGHT) &&
+									!(door.x === 750 && door.y === GROUND_Y - 108 - GROUND_HEIGHT)
+								);
+							} else if (player.keyCount === 2) {
+								lockedDoors = lockedDoors.filter(door => 
+									!(door.x === 1014 && door.y === 230) &&
+									!(door.x === 1050 && door.y === 194) &&
+									!(door.x === 1086 && door.y === 230)
+								);
+							}
+						} else if (difficulty === 'hard') {
+							if (player.keyCount === 1) {
+								lockedDoors = lockedDoors.filter(door => 
+									!(door.x === 714 && door.y === GROUND_Y - 72 - GROUND_HEIGHT) &&
+									!(door.x === 750 && door.y === GROUND_Y - 108 - GROUND_HEIGHT)
+								);
+							} else if (player.keyCount === 2) {
+								lockedDoors = lockedDoors.filter(door => 
+									!(door.x === 600 && door.y === 310)
+								);
+							} else if (player.keyCount === 3) {
+								lockedDoors = lockedDoors.filter(door => 
+									!(door.x === 1014 && door.y === 230) &&
+									!(door.x === 1050 && door.y === 194) &&
+									!(door.x === 1086 && door.y === 230)
+								);
+							}
+						} else {
+							lockedDoors = []; // For levels 6 and 7
+						}
+					} else {
+						lockedDoors = []; // For levels 6 and 7
+					}
+					
+					return false;
+				}
+				return true;
+			});
 
-            projectiles = projectiles.filter(projectile => {
-                projectile.x += projectile.vx;
-                if (collides(player, projectile) && player.hitTimer === 0 && player.lives > 0) {
-                    player.lives--;
-                    player.hitTimer = 60;
-                    livesDisplay.textContent = `Lives: ${player.lives}`;
-                    playTone(100, 0.2, 'square', 0.5);
-                    if (player.lives <= 0) endGame();
-                    return false;
-                }
-                return projectile.x > 0 && projectile.x < 1200;
-            });
+			projectiles = projectiles.filter(projectile => {
+				projectile.x += projectile.vx;
+				if (collides(player, projectile) && player.hitTimer === 0 && player.lives > 0) {
+					player.lives--;
+					player.hitTimer = 60;
+					livesDisplay.textContent = `Lives: ${player.lives}`;
+					playTone(100, 0.2, 'square', 0.5);
+					if (player.lives <= 0) endGame();
+					return false;
+				}
+				for (let box of boxes) {
+					if (!box.broken && collides(projectile, box)) {
+						return false; // Remove projectile if it hits an unbroken box
+					}
+				}
+				for (let door of lockedDoors) {
+					if (collides(projectile, door)) {
+						return false; // Remove projectile if it hits a locked door
+					}
+				}
+				return projectile.x > 0 && projectile.x < 1200;
+			});
 
             rocks = rocks.filter(rock => {
                 rock.y += rock.vy;
@@ -609,26 +933,77 @@
                 }
                 return rock.y < GROUND_Y + 20;
             });
+			
+			// Boss hit effect timer
+			if (bossHitTimer > 0) bossHitTimer--;
+			
+			// Boss hit effect timer
+			if (bossHitTimer > 0) bossHitTimer--;
+			if (bossInvulnTimer > 0) bossInvulnTimer--; // Add this line
 
-            if (level === 3 && Math.random() < (difficulty === 'easy' ? 0.01 : difficulty === 'normal' ? 0.02 : 0.03)) {
-                rocks.push({
-                    x: Math.random() * 1160 + 20,
-                    y: -20,
-                    vy: difficulty === 'easy' ? 2 : difficulty === 'normal' ? 3 : 4,
-                    width: 36,
-                    height: 36
-                });
-            }
-            if (level === 5 && Math.random() < (difficulty === 'easy' ? 0.005 : difficulty === 'normal' ? 0.01 : 0.015)) {
-                rocks.push({
-                    x: Math.random() * 1160 + 20,
-                    y: -20,
-                    vy: difficulty === 'easy' ? 2 : difficulty === 'normal' ? 3 : 4,
-                    width: 36,
-                    height: 36
-                });
-            }
+			// Killer power-up spawn timer
+			if (level === 10 && powerups.length === 0) {
+				// ... (rest unchanged)
+			}
 
+			// Box spawn timer for killer power-up
+			console.log("Pre-check - level:", level, "boxes.length:", boxes.length, "killerTimer:", player.killerTimer, "spawnTimer:", powerupSpawnTimer);
+			if (level === 10 && boxes.length === 0 && player.killerTimer <= 0) {
+				console.log("Box spawn check - boxes:", boxes.length, "killerTimer:", player.killerTimer, "spawnTimer:", powerupSpawnTimer);
+				if (powerupSpawnTimer <= 0) {
+					boxes.push({
+						x: Math.random() * (canvas.width - 36),
+						y: GROUND_Y - 36 - GROUND_HEIGHT,
+						width: 36, height: 36,
+						broken: false
+					});
+					powerupSpawnTimer = Math.floor(Math.random() * 300) + 300; // 5-10 seconds (300-600 frames)
+					console.log("Box spawned, new spawnTimer:", powerupSpawnTimer);
+				} else {
+					powerupSpawnTimer--;
+				}
+			}
+			
+			// Remove broken boxes
+			boxes = boxes.filter(box => !box.broken);
+
+			if (level === 3 && Math.random() < (difficulty === 'easy' ? 0.01 : difficulty === 'normal' ? 0.02 : 0.03)) {
+				rocks.push({
+					x: Math.random() * 1160 + 20,
+					y: -20,
+					vy: difficulty === 'easy' ? 2 : difficulty === 'normal' ? 3 : 4,
+					width: 36,
+					height: 36
+				});
+			}
+			if (level === 5 && Math.random() < (difficulty === 'easy' ? 0.005 : difficulty === 'normal' ? 0.01 : 0.015)) {
+				rocks.push({
+					x: Math.random() * 1160 + 20,
+					y: -20,
+					vy: difficulty === 'easy' ? 2 : difficulty === 'normal' ? 3 : 4,
+					width: 36,
+					height: 36
+				});
+			}
+			if (level === 9 && Math.random() < (difficulty === 'easy' ? 0.005 : difficulty === 'normal' ? 0.01 : 0.02)) {
+				rocks.push({
+					x: Math.random() * 1160 + 20,
+					y: -20,
+					vy: difficulty === 'easy' ? 2 : difficulty === 'normal' ? 3 : 5,
+					width: 36,
+					height: 36
+				});
+			}
+			if (level === 10 && Math.random() < (difficulty === 'easy' ? 0.01 : difficulty === 'normal' ? 0.015 : 0.025)) {
+				rocks.push({
+					x: Math.random() * 1160 + 20,
+					y: -20,
+					vy: difficulty === 'easy' ? 2 : difficulty === 'normal' ? 3 : 5,
+					width: 36,
+					height: 36
+				});
+			}
+			
             particles = particles.filter(p => {
                 p.x += p.vx;
                 p.y += p.vy;
@@ -638,13 +1013,13 @@
             });
 
             if (coinCount >= TOTAL_COINS && gameState === 'playing') {
-                if (level < 5) {
+                if (level < 10) {
                     transitionToNextLevel();
                 } else {
                     gameState = 'won';
                 }
             }
-        }
+		}
 
         function draw() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -728,7 +1103,7 @@
                 }
             });
 
-            // Draw power-up timers in upper left corner
+            // Draw power-up timers
             let yOffset = 10;
             if (player.killerTimer > 0 && killerPowerImage.complete) {
                 ctx.drawImage(killerPowerImage, 10, yOffset, 72, 72);
@@ -744,21 +1119,35 @@
                 ctx.fillText(Math.ceil(player.speedTimer / 60), 50, yOffset + 20);
             }
 
-            // Draw player
-            if (playerImage.complete) {
-                if (player.hitTimer > 0 && player.hitTimer % 10 < 5) {
-                    ctx.globalAlpha = 0.5;
-                    ctx.drawImage(playerImage, player.x, player.y, player.width, player.height);
-                    ctx.globalAlpha = 1.0;
-                } else {
-                    ctx.drawImage(playerImage, player.x, player.y, player.width, player.height);
+            // Draw player with corrected blinking
+            if (playerIdleImage.complete && playerMoveImage.complete) {
+                ctx.save();
+                let currentImage = playerIdleImage;
+                const isMoving = player.moving || player.movingLeft || player.movingRight;
+
+                if (isMoving) {
+                    currentImage = (Math.floor(animationFrame / ANIMATION_SPEED) % 2 === 0) ? playerIdleImage : playerMoveImage;
                 }
+
+                if (player.hitTimer > 0 && player.hitTimer % 10 < 5) {
+                    ctx.globalAlpha = 0.5; // Blink effect
+                }
+
+                if (player.facingRight) {
+                    ctx.scale(-1, 1);
+                    ctx.drawImage(currentImage, -player.x - player.width, player.y, player.width, player.height);
+                } else {
+                    ctx.drawImage(currentImage, player.x, player.y, player.width, player.height);
+                }
+
+                ctx.globalAlpha = 1.0; // Reset alpha
+                ctx.restore();
             } else {
-                ctx.fillStyle = player.hitTimer > 0 && player.hitTimer % 10 < 5 ? 'white' : (player.moving ? 'blue' : 'red');
+                ctx.fillStyle = player.hitTimer > 0 && player.hitTimer % 10 < 5 ? 'white' : (player.moving || player.movingLeft || player.movingRight ? 'blue' : 'red');
                 ctx.fillRect(player.x, player.y, player.width, player.height);
             }
 
-            // Draw power-up indicators above head with pulsing effect
+            // Draw power-up indicators
             const pulseScale = 1 + Math.sin(Date.now() * 0.005) * 0.1;
             if (player.killerTimer > 0 && killerPowerImage.complete) {
                 ctx.save();
@@ -776,37 +1165,79 @@
             }
 
             // Draw enemies
-            enemies.forEach(enemy => {
-                let enemyImage;
-                switch (enemy.type) {
-                    case 'walker': enemyImage = walkerImage; break;
-                    case 'flyer': enemyImage = flyerImage; break;
-                    case 'shooter': enemyImage = shooterImage; break;
-                    case 'jumper': enemyImage = jumperImage; break;
-                }
-                if (enemyImage.complete) {
-                    ctx.drawImage(enemyImage, enemy.x, enemy.y, enemy.width, enemy.height);
-                } else {
-                    ctx.fillStyle = enemy.type === 'walker' ? 'green' : (enemy.type === 'flyer' ? 'purple' : (enemy.type === 'shooter' ? 'orange' : 'pink'));
-                    ctx.fillRect(enemy.x, enemy.y, enemy.width, enemy.height);
-                }
-            });
+			enemies.forEach(enemy => {
+				ctx.save();
+				let idleImage, moveImage;
+				switch (enemy.type) {
+					case 'walker':
+						idleImage = walkerIdleImage;
+						moveImage = walkerMoveImage;
+						break;
+					case 'flyer':
+						idleImage = flyerIdleImage;
+						moveImage = flyerMoveImage;
+						break;
+					case 'shooter':
+						idleImage = shooterImage;
+						moveImage = shooterImage;
+						break;
+					case 'jumper':
+						idleImage = jumperIdleImage;
+						moveImage = jumperMoveImage;
+						break;
+					case 'boss':
+						idleImage = bossIdleImage;
+						moveImage = bossMoveImage;
+						break;
+				}
+
+				if (idleImage.complete && moveImage.complete) {
+					let currentImage = idleImage;
+					if (enemy.type !== 'shooter' && enemy.animationFrame > 0) {
+						currentImage = (Math.floor(enemy.animationFrame / ANIMATION_SPEED) % 2 === 0) ? idleImage : moveImage;
+					}
+					if (enemy.type === 'boss' && bossHitTimer > 0 && bossHitTimer % 4 < 2) {
+						ctx.globalCompositeOperation = 'source-atop'; // Blend red over sprite
+						ctx.fillStyle = 'rgba(255, 0, 0, 0.5)';
+					}
+					if (enemy.facingRight && enemy.type !== 'shooter') {
+						ctx.scale(-1, 1);
+						ctx.drawImage(currentImage, -enemy.x - enemy.width, enemy.y, enemy.width, enemy.height);
+					} else {
+						ctx.drawImage(currentImage, enemy.x, enemy.y, enemy.width, enemy.height);
+					}
+					if (enemy.type === 'boss' && bossHitTimer > 0 && bossHitTimer % 4 < 2) {
+						ctx.fillRect(enemy.x, enemy.y, enemy.width, enemy.height);
+						ctx.globalCompositeOperation = 'source-over'; // Reset to default
+					}
+				} else {
+					ctx.fillStyle = enemy.type === 'walker' ? 'green' : (enemy.type === 'flyer' ? 'purple' : (enemy.type === 'shooter' ? 'orange' : (enemy.type === 'jumper' ? 'pink' : 'darkred')));
+					ctx.fillRect(enemy.x, enemy.y, enemy.width, enemy.height);
+				}
+				ctx.restore();
+			});
 
             // Draw coins
-            coins.forEach(coin => {
-                if (coinImage.complete) {
-                    ctx.save();
-                    ctx.translate(coin.x + coin.width / 2, coin.y + coin.height / 2);
-                    ctx.scale(Math.abs(Math.cos(coinSpinAngle)), 1);
-                    ctx.drawImage(coinImage, -coin.width / 2, -coin.height / 2, coin.width, coin.height);
-                    ctx.restore();
-                } else {
-                    ctx.fillStyle = 'yellow';
-                    ctx.beginPath();
-                    ctx.arc(coin.x + coin.width / 2, coin.y + coin.height / 2, coin.width / 2, 0, Math.PI * 2);
-                    ctx.fill();
-                }
-            });
+			coins.forEach(coin => {
+				if (coin.isBig && bigCoinImage.complete) {
+					ctx.save();
+					ctx.translate(coin.x + coin.width / 2, coin.y + coin.height / 2);
+					ctx.scale(Math.abs(Math.cos(coinSpinAngle)), 1);
+					ctx.drawImage(bigCoinImage, -coin.width / 2, -coin.height / 2, coin.width, coin.height);
+					ctx.restore();
+				} else if (coinImage.complete) {
+					ctx.save();
+					ctx.translate(coin.x + coin.width / 2, coin.y + coin.height / 2);
+					ctx.scale(Math.abs(Math.cos(coinSpinAngle)), 1);
+					ctx.drawImage(coinImage, -coin.width / 2, -coin.height / 2, coin.width, coin.height);
+					ctx.restore();
+				} else {
+					ctx.fillStyle = 'yellow';
+					ctx.beginPath();
+					ctx.arc(coin.x + coin.width / 2, coin.y + coin.height / 2, coin.width / 2, 0, Math.PI * 2);
+					ctx.fill();
+				}
+			});
 
             // Draw spikes
             spikes.forEach(spike => {
@@ -832,6 +1263,24 @@
                     ctx.fillRect(box.x, box.y, box.width, box.height);
                 }
             });
+			
+			lockedDoors.forEach(door => {
+				if (lockedDoorImage.complete) {
+					ctx.drawImage(lockedDoorImage, door.x, door.y, door.width, door.height);
+				} else {
+					ctx.fillStyle = 'gray';
+					ctx.fillRect(door.x, door.y, door.width, door.height);
+				}
+			});
+
+			keys.forEach(key => {
+				if (keyImage.complete) {
+					ctx.drawImage(keyImage, key.x, key.y, key.width, key.height);
+				} else {
+					ctx.fillStyle = 'gold';
+					ctx.fillRect(key.x, key.y, key.width, key.height);
+				}
+			});
 
             // Draw power-ups
             powerups.forEach(power => {
@@ -921,6 +1370,7 @@
             player.speed = player.baseSpeed;
             player.speedTimer = 0;
             player.killerTimer = 0;
+			player.keyCount = 0;
         }
 
         function resetGame() {
@@ -936,18 +1386,24 @@
             player.speed = player.baseSpeed;
             player.jumpBuffer = 0;
             player.hasJumped = false;
+            player.movingLeft = false;
+            player.movingRight = false;
+            player.facingRight = true;
+			player.keyCount = 0;
 
             if (difficulty === 'easy') {
                 player.lives = 5;
                 if (level === 1) {
                     enemies = [
-                        { x: 200, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 1, type: 'walker' }
+                        { x: 200, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 1, type: 'walker', facingRight: true, animationFrame: 0 }
                     ];
-                    coins = [
-                        { x: 150, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
-                        { x: 250, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
-                        { x: 450, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
-                    ];
+					coins = [
+						{ x: 150, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 250, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 450, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
+					];
+					lockedDoors = [];
+					keys = [];
                     spikes = [];
                     boxes = [
                         { x: 600, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36, broken: false }
@@ -959,7 +1415,7 @@
                     TOTAL_COINS = 4;
                 } else if (level === 2) {
                     enemies = [
-                        { x: 300, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 2, type: 'walker' }
+                        { x: 300, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 2, type: 'walker', facingRight: true, animationFrame: 0 }
                     ];
                     coins = [
                         { x: 200, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
@@ -980,7 +1436,7 @@
                     TOTAL_COINS = 3;
                 } else if (level === 3) {
                     enemies = [
-                        { x: 250, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 2, type: 'walker' },
+                        { x: 250, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 2, type: 'walker', facingRight: true, animationFrame: 0 },
                         { x: 700, y: 400, width: 48, height: 48, speed: 0, type: 'shooter', shootTimer: 120 }
                     ];
                     coins = [
@@ -1001,7 +1457,7 @@
                     TOTAL_COINS = 4;
                 } else if (level === 4) {
                     enemies = [
-                        { x: 200, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 2, type: 'walker' },
+                        { x: 200, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 2, type: 'walker', facingRight: true, animationFrame: 0 },
                         { x: 750, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: -1, type: 'shooter', shootTimer: 120 }
                     ];
                     coins = [
@@ -1024,8 +1480,8 @@
                     TOTAL_COINS = 4;
                 } else if (level === 5) {
                     enemies = [
-                        { x: 200, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 1, type: 'walker' },
-                        { x: 350, y: 350, width: 48, height: 48, speed: 2, type: 'flyer', baseY: 350 },
+                        { x: 200, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 1, type: 'walker', facingRight: true, animationFrame: 0 },
+                        { x: 350, y: 350, width: 48, height: 48, speed: 2, type: 'flyer', baseY: 350, facingRight: true, animationFrame: 0 },
                         { x: 800, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 0, type: 'shooter', shootTimer: 120 }
                     ];
                     coins = [
@@ -1049,13 +1505,161 @@
                         { x: 400, y: 300, width: 32, height: 32, type: 'speed' }
                     ];
                     TOTAL_COINS = 5;
-                }
+                } else if (level === 6) {
+					enemies = [
+						{ x: 200, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 1, type: 'walker', facingRight: true, animationFrame: 0 }
+					];
+					coins = [
+						{ x: 150, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 750, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
+					];
+					spikes = [];
+					boxes = [
+						{ x: 400, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36, broken: false }
+					];
+					platforms = [];
+					powerups = [
+						{ x: 300, y: GROUND_Y - 108 - GROUND_HEIGHT, width: 72, height: 72, type: 'killer' }
+					];
+					lockedDoors = [
+						{ x: 714, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 750, y: GROUND_Y - 72 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 786, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
+					];
+					keys = [
+						{ x: 500, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
+					];
+					TOTAL_COINS = 3;
+				} else if (level === 7) {
+					enemies = [
+						{ x: 200, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 1, type: 'walker', facingRight: true, animationFrame: 0 }
+					];
+					coins = [
+						{ x: 150, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 350, y: 408, width: 36, height: 36 },
+						{ x: 900, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
+					];
+					spikes = [
+						{ x: 600, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
+					];
+					boxes = [
+						{ x: 450, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36, broken: false }
+					];
+					platforms = [
+						{ x: 300, y: 426, width: 108, height: PLATFORM_HEIGHT }
+					];
+					powerups = [
+						{ x: 350, y: 376, width: 32, height: 32, type: 'speed' }
+					];
+					lockedDoors = [
+						{ x: 864, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 900, y: GROUND_Y - 72 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 936, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 900, y: GROUND_Y - GROUND_HEIGHT, width: 36, height: 36 }
+					];
+					keys = [
+						{ x: 200, y: 390, width: 36, height: 36 }
+					];
+					TOTAL_COINS = 4;
+				} else if (level === 8) {
+					enemies = [
+						{ x: 200, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 1, type: 'walker', facingRight: true, animationFrame: 0 }
+					];
+					coins = [
+						{ x: 150, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 750, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }, // Ground coin
+						{ x: 1050, y: 230, width: 36, height: 36 } // Elevated coin
+					];
+					spikes = [
+						{ x: 450, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
+					];
+					boxes = [
+						{ x: 600, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36, broken: false }
+					];
+					platforms = [
+						{ x: 300, y: 426, width: 108, height: PLATFORM_HEIGHT },
+						{ x: 750, y: 346, width: 108, height: PLATFORM_HEIGHT },
+						{ x: 1000, y: 266, width: 108, height: PLATFORM_HEIGHT }
+					];
+					powerups = [
+						{ x: 750, y: 300, width: 32, height: 32, type: 'speed' }
+					];
+					lockedDoors = [
+						// Ground-level doors (around coin at x: 750)
+						{ x: 714, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 750, y: GROUND_Y - 72 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 786, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+						// Elevated doors (around coin at x: 1050, y: 230)
+						{ x: 1014, y: 230, width: 36, height: 36 },
+						{ x: 1050, y: 194, width: 36, height: 36 },
+						{ x: 1086, y: 230, width: 36, height: 36 }
+					];
+					keys = [
+						{ x: 350, y: 390, width: 36, height: 36 }, // First key (unlocks ground doors)
+						{ x: 900, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 } // Second key (unlocks elevated doors)
+					];
+					TOTAL_COINS = 4; // 3 coins + 1 from box
+				} else if (level === 9) {
+					enemies = [
+						{ x: 200, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 1, type: 'walker', facingRight: true, animationFrame: 0 },
+						{ x: 600, y: 350, width: 48, height: 48, speed: 2, type: 'flyer', baseY: 350, facingRight: true, animationFrame: 0 }
+					];
+					coins = [
+						{ x: 150, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 450, y: 408, width: 36, height: 36 },
+						{ x: 1050, y: 230, width: 36, height: 36 }
+					];
+					spikes = [
+						{ x: 300, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 750, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
+					];
+					boxes = [
+						{ x: 900, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36, broken: false }
+					];
+					platforms = [
+						{ x: 400, y: 426, width: 108, height: PLATFORM_HEIGHT },
+						{ x: 600, y: 346, width: 144, height: PLATFORM_HEIGHT },
+						{ x: 1000, y: 266, width: 108, height: PLATFORM_HEIGHT }
+					];
+					powerups = [
+						{ x: 450, y: 376, width: 32, height: 32, type: 'speed' }
+					];
+					lockedDoors = [
+						{ x: 1014, y: 230, width: 36, height: 36 },
+						{ x: 1050, y: 194, width: 36, height: 36 },
+						{ x: 1086, y: 230, width: 36, height: 36 }
+					];
+					keys = [
+						{ x: 700, y: 310, width: 36, height: 36 }
+					];
+					TOTAL_COINS = 4; // 3 coins + 1 from box
+				} else if (level === 10) {
+					boss = {
+						x: 550, y: GROUND_Y - 72 - GROUND_HEIGHT, width: 72, height: 72,
+						speed: 3, type: 'boss', jumpTimer: 60, vy: 0, hp: 5, facingRight: true, animationFrame: 0
+					};
+					enemies = [boss];
+					coins = [];
+					spikes = [];
+					boxes = [];
+					platforms = [
+						{ x: 200, y: 426, width: 108, height: PLATFORM_HEIGHT }, // Left
+						{ x: 546, y: 346, width: 108, height: PLATFORM_HEIGHT }, // Middle
+						{ x: 892, y: 426, width: 108, height: PLATFORM_HEIGHT }  // Right
+					];
+					powerups = [];
+					lockedDoors = [];
+					keys = [];
+					rocks = [];
+					powerupSpawnTimer = 0; 
+					TOTAL_COINS = 1; // Big coin after boss defeat
+				}
             } else if (difficulty === 'normal') {
                 player.lives = 3;
                 if (level === 1) {
                     enemies = [
-                        { x: 200, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 2, type: 'walker' },
-                        { x: 650, y: 350, width: 48, height: 48, speed: 3, type: 'flyer', baseY: 350 }
+                        { x: 200, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 2, type: 'walker', facingRight: true, animationFrame: 0 },
+                        { x: 650, y: 350, width: 48, height: 48, speed: 3, type: 'flyer', baseY: 350, facingRight: true, animationFrame: 0 }
                     ];
                     coins = [
                         { x: 150, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
@@ -1075,8 +1679,8 @@
                     TOTAL_COINS = 4;
                 } else if (level === 2) {
                     enemies = [
-                        { x: 300, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 3, type: 'walker' },
-                        { x: 700, y: 320, width: 48, height: 48, speed: 4, type: 'flyer', baseY: 320 }
+                        { x: 300, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 3, type: 'walker', facingRight: true, animationFrame: 0 },
+                        { x: 700, y: 320, width: 48, height: 48, speed: 4, type: 'flyer', baseY: 320, facingRight: true, animationFrame: 0 }
                     ];
                     coins = [
                         { x: 200, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
@@ -1097,9 +1701,9 @@
                     TOTAL_COINS = 3;
                 } else if (level === 3) {
                     enemies = [
-                        { x: 250, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 3, type: 'walker' },
+                        { x: 250, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 3, type: 'walker', facingRight: true, animationFrame: 0 },
                         { x: 700, y: 400, width: 48, height: 48, speed: 0, type: 'shooter', shootTimer: 60 },
-                        { x: 900, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 2, type: 'jumper', jumpTimer: 30, vy: 0 }
+                        { x: 900, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 2, type: 'jumper', jumpTimer: 30, vy: 0, facingRight: true, animationFrame: 0 }
                     ];
                     coins = [
                         { x: 200, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
@@ -1122,9 +1726,9 @@
                     TOTAL_COINS = 5;
                 } else if (level === 4) {
                     enemies = [
-                        { x: 200, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 3, type: 'walker' },
+                        { x: 200, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 3, type: 'walker', facingRight: true, animationFrame: 0 },
                         { x: 750, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: -2, type: 'shooter', shootTimer: 60 },
-                        { x: 900, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 3, type: 'jumper', jumpTimer: 45, vy: 0 }
+                        { x: 900, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 3, type: 'jumper', jumpTimer: 45, vy: 0, facingRight: true, animationFrame: 0 }
                     ];
                     coins = [
                         { x: 150, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
@@ -1148,10 +1752,10 @@
                     TOTAL_COINS = 5;
                 } else if (level === 5) {
                     enemies = [
-                        { x: 200, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 2, type: 'walker' },
-                        { x: 350, y: 350, width: 48, height: 48, speed: 3, type: 'flyer', baseY: 350 },
+                        { x: 200, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 2, type: 'walker', facingRight: true, animationFrame: 0 },
+                        { x: 350, y: 350, width: 48, height: 48, speed: 3, type: 'flyer', baseY: 350, facingRight: true, animationFrame: 0 },
                         { x: 800, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 0, type: 'shooter', shootTimer: 90 },
-                        { x: 1000, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: -3, type: 'jumper', jumpTimer: 60, vy: 0 }
+                        { x: 1000, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: -3, type: 'jumper', jumpTimer: 60, vy: 0, facingRight: false, animationFrame: 0 }
                     ];
                     coins = [
                         { x: 150, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
@@ -1176,14 +1780,176 @@
                         { x: 400, y: 300, width: 32, height: 32, type: 'speed' }
                     ];
                     TOTAL_COINS = 6;
-                }
+                } else if (level === 6) {
+					enemies = [
+						{ x: 200, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 2, type: 'walker', facingRight: true, animationFrame: 0 }
+					];
+					coins = [
+						{ x: 150, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 750, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
+					];
+					spikes = [
+						{ x: 400, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
+					];
+					boxes = [
+						{ x: 500, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36, broken: false }
+					];
+					platforms = [];
+					powerups = [
+						{ x: 300, y: GROUND_Y - 108 - GROUND_HEIGHT, width: 72, height: 72, type: 'killer' }
+					];
+					lockedDoors = [
+						{ x: 714, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 750, y: GROUND_Y - 72 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 786, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 750, y: GROUND_Y - GROUND_HEIGHT, width: 36, height: 36 }
+					];
+					keys = [
+						{ x: 600, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
+					];
+					TOTAL_COINS = 3;
+				} else if (level === 7) {
+					enemies = [
+						{ x: 200, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 2, type: 'walker', facingRight: true, animationFrame: 0 },
+						{ x: 650, y: 350, width: 48, height: 48, speed: 3, type: 'flyer', baseY: 350, facingRight: true, animationFrame: 0 }
+					];
+					coins = [
+						{ x: 150, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 350, y: 408, width: 36, height: 36 },
+						{ x: 900, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
+					];
+					spikes = [
+						{ x: 500, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
+					];
+					boxes = [
+						{ x: 450, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36, broken: false }
+					];
+					platforms = [
+						{ x: 300, y: 426, width: 108, height: PLATFORM_HEIGHT }
+					];
+					powerups = [
+						{ x: 350, y: 376, width: 32, height: 32, type: 'speed' }
+					];
+					lockedDoors = [
+						{ x: 864, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 900, y: GROUND_Y - 72 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 936, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 900, y: GROUND_Y - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 828, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
+					];
+					keys = [
+						{ x: 200, y: 390, width: 36, height: 36 }
+					];
+					TOTAL_COINS = 4;
+				} else if (level === 8) {
+					enemies = [
+						{ x: 200, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 2, type: 'walker', facingRight: true, animationFrame: 0 },
+						{ x: 650, y: 350, width: 48, height: 48, speed: 3, type: 'flyer', baseY: 350, facingRight: true, animationFrame: 0 }
+					];
+					coins = [
+						{ x: 150, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 750, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }, // Ground coin
+						{ x: 1050, y: 230, width: 36, height: 36 } // Elevated coin
+					];
+					spikes = [
+						{ x: 450, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 600, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
+					];
+					boxes = [
+						{ x: 500, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36, broken: false }
+					];
+					platforms = [
+						{ x: 300, y: 426, width: 108, height: PLATFORM_HEIGHT },
+						{ x: 750, y: 346, width: 108, height: PLATFORM_HEIGHT },
+						{ x: 1000, y: 266, width: 108, height: PLATFORM_HEIGHT }
+					];
+					powerups = [
+						{ x: 750, y: 300, width: 32, height: 32, type: 'speed' }
+					];
+					lockedDoors = [
+						// Ground-level doors (around coin at x: 750)
+						{ x: 714, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 750, y: GROUND_Y - 72 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 786, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+						// Elevated doors (around coin at x: 1050, y: 230)
+						{ x: 1014, y: 230, width: 36, height: 36 },
+						{ x: 1050, y: 194, width: 36, height: 36 },
+						{ x: 1086, y: 230, width: 36, height: 36 }
+					];
+					keys = [
+						{ x: 350, y: 390, width: 36, height: 36 }, // First key (unlocks ground doors)
+						{ x: 900, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 } // Second key (unlocks elevated doors)
+					];
+					TOTAL_COINS = 4; // 3 coins + 1 from box
+				} else if (level === 9) {
+					enemies = [
+						{ x: 200, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 2, type: 'walker', facingRight: true, animationFrame: 0 },
+						{ x: 600, y: 350, width: 48, height: 48, speed: 3, type: 'flyer', baseY: 350, facingRight: true, animationFrame: 0 },
+						{ x: 900, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 0, type: 'shooter', shootTimer: 90 }
+					];
+					coins = [
+						{ x: 150, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 450, y: 408, width: 36, height: 36 },
+						{ x: 750, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 1050, y: 230, width: 36, height: 36 }
+					];
+					spikes = [
+						{ x: 300, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 714, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 786, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
+					];
+					boxes = [
+						{ x: 900, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36, broken: false }
+					];
+					platforms = [
+						{ x: 400, y: 426, width: 72, height: PLATFORM_HEIGHT },
+						{ x: 600, y: 346, width: 108, height: PLATFORM_HEIGHT },
+						{ x: 1000, y: 266, width: 72, height: PLATFORM_HEIGHT }
+					];
+					powerups = [
+						{ x: 450, y: 376, width: 32, height: 32, type: 'speed' },
+						{ x: 650, y: GROUND_Y - 108 - GROUND_HEIGHT, width: 72, height: 72, type: 'killer' }
+					];
+					lockedDoors = [
+						{ x: 714, y: GROUND_Y - 72 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 750, y: GROUND_Y - 108 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 1014, y: 230, width: 36, height: 36 },
+						{ x: 1050, y: 194, width: 36, height: 36 },
+						{ x: 1086, y: 230, width: 36, height: 36 }
+					];
+					keys = [
+						{ x: 300, y: 390, width: 36, height: 36 }, // Unlocks ground doors
+						{ x: 650, y: 310, width: 36, height: 36 }  // Unlocks elevated doors
+					];
+					TOTAL_COINS = 5; // 4 coins + 1 from box
+				} else if (level === 10) {
+					boss = {
+						x: 550, y: GROUND_Y - 72 - GROUND_HEIGHT, width: 72, height: 72,
+						speed: 3, type: 'boss', jumpTimer: 60, vy: 0, hp: 7, facingRight: true, animationFrame: 0
+					};
+					enemies = [boss];
+					coins = [];
+					spikes = [];
+					boxes = [];
+					platforms = [
+						{ x: 200, y: 426, width: 108, height: PLATFORM_HEIGHT }, // Left
+						{ x: 546, y: 346, width: 108, height: PLATFORM_HEIGHT }, // Middle
+						{ x: 892, y: 426, width: 108, height: PLATFORM_HEIGHT }  // Right
+					];
+					powerups = [];
+					lockedDoors = [];
+					keys = [];
+					rocks = [];
+					powerupSpawnTimer = 0; 
+					TOTAL_COINS = 1;
+				}
             } else if (difficulty === 'hard') {
                 player.lives = 2;
                 if (level === 1) {
                     enemies = [
-                        { x: 200, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 3, type: 'walker' },
-                        { x: 650, y: 350, width: 48, height: 48, speed: 4, type: 'flyer', baseY: 350 },
-                        { x: 400, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 2, type: 'jumper', jumpTimer: 60, vy: 0 }
+                        { x: 200, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 3, type: 'walker', facingRight: true, animationFrame: 0 },
+                        { x: 650, y: 350, width: 48, height: 48, speed: 4, type: 'flyer', baseY: 350, facingRight: true, animationFrame: 0 },
+                        { x: 400, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 2, type: 'jumper', jumpTimer: 60, vy: 0, facingRight: true, animationFrame: 0 }
                     ];
                     coins = [
                         { x: 150, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
@@ -1204,8 +1970,8 @@
                     TOTAL_COINS = 4;
                 } else if (level === 2) {
                     enemies = [
-                        { x: 300, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 4, type: 'walker' },
-                        { x: 700, y: 320, width: 48, height: 48, speed: 5, type: 'flyer', baseY: 320 },
+                        { x: 300, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 4, type: 'walker', facingRight: true, animationFrame: 0 },
+                        { x: 700, y: 320, width: 48, height: 48, speed: 5, type: 'flyer', baseY: 320, facingRight: true, animationFrame: 0 },
                         { x: 500, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 0, type: 'shooter', shootTimer: 60 }
                     ];
                     coins = [
@@ -1228,10 +1994,10 @@
                     TOTAL_COINS = 3;
                 } else if (level === 3) {
                     enemies = [
-                        { x: 250, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 4, type: 'walker' },
+                        { x: 250, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 4, type: 'walker', facingRight: true, animationFrame: 0 },
                         { x: 700, y: 400, width: 48, height: 48, speed: 0, type: 'shooter', shootTimer: 45 },
-                        { x: 900, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 3, type: 'jumper', jumpTimer: 30, vy: 0 },
-                        { x: 500, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 2, type: 'walker' }
+                        { x: 900, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 3, type: 'jumper', jumpTimer: 30, vy: 0, facingRight: true, animationFrame: 0 },
+                        { x: 500, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 2, type: 'walker', facingRight: true, animationFrame: 0 }
                     ];
                     coins = [
                         { x: 200, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
@@ -1255,10 +2021,10 @@
                     TOTAL_COINS = 5;
                 } else if (level === 4) {
                     enemies = [
-                        { x: 200, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 4, type: 'walker' },
+                        { x: 200, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 4, type: 'walker', facingRight: true, animationFrame: 0 },
                         { x: 750, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: -3, type: 'shooter', shootTimer: 45 },
-                        { x: 900, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 4, type: 'jumper', jumpTimer: 45, vy: 0 },
-                        { x: 600, y: 350, width: 48, height: 48, speed: 4, type: 'flyer', baseY: 350 }
+                        { x: 900, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 4, type: 'jumper', jumpTimer: 45, vy: 0, facingRight: true, animationFrame: 0 },
+                        { x: 600, y: 350, width: 48, height: 48, speed: 4, type: 'flyer', baseY: 350, facingRight: true, animationFrame: 0 }
                     ];
                     coins = [
                         { x: 150, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
@@ -1283,11 +2049,11 @@
                     TOTAL_COINS = 5;
                 } else if (level === 5) {
                     enemies = [
-                        { x: 200, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 3, type: 'walker' },
-                        { x: 350, y: 350, width: 48, height: 48, speed: 4, type: 'flyer', baseY: 350 },
+                        { x: 200, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 3, type: 'walker', facingRight: true, animationFrame: 0 },
+                        { x: 350, y: 350, width: 48, height: 48, speed: 4, type: 'flyer', baseY: 350, facingRight: true, animationFrame: 0 },
                         { x: 800, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 0, type: 'shooter', shootTimer: 60 },
-                        { x: 1000, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: -4, type: 'jumper', jumpTimer: 45, vy: 0 },
-                        { x: 500, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 3, type: 'walker' }
+                        { x: 1000, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: -4, type: 'jumper', jumpTimer: 45, vy: 0, facingRight: false, animationFrame: 0 },
+                        { x: 500, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 3, type: 'walker', facingRight: true, animationFrame: 0 }
                     ];
                     coins = [
                         { x: 150, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
@@ -1313,8 +2079,181 @@
                         { x: 400, y: 300, width: 32, height: 32, type: 'speed' }
                     ];
                     TOTAL_COINS = 6;
-                }
-            }
+                } else if (level === 6) {
+					enemies = [
+						{ x: 200, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 3, type: 'walker', facingRight: true, animationFrame: 0 }
+					];
+					coins = [
+						{ x: 150, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 750, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
+					];
+					spikes = [
+						{ x: 400, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 500, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
+					];
+					boxes = [
+						{ x: 600, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36, broken: false }
+					];
+					platforms = [];
+					powerups = [
+						{ x: 300, y: GROUND_Y - 108 - GROUND_HEIGHT, width: 72, height: 72, type: 'killer' }
+					];
+					lockedDoors = [
+						{ x: 714, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 750, y: GROUND_Y - 72 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 786, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 750, y: GROUND_Y - GROUND_HEIGHT, width: 36, height: 36 }
+					];
+					keys = [
+						{ x: 650, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
+					];
+					TOTAL_COINS = 3;
+				} else if (level === 7) {
+					enemies = [
+						{ x: 200, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 3, type: 'walker', facingRight: true, animationFrame: 0 },
+						{ x: 650, y: 350, width: 48, height: 48, speed: 4, type: 'flyer', baseY: 350, facingRight: true, animationFrame: 0 }
+					];
+					coins = [
+						{ x: 150, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 350, y: 408, width: 36, height: 36 },
+						{ x: 900, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
+					];
+					spikes = [
+						{ x: 500, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 600, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
+					];
+					boxes = [
+						{ x: 450, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36, broken: false }
+					];
+					platforms = [
+						{ x: 300, y: 426, width: 108, height: PLATFORM_HEIGHT },
+						{ x: 700, y: 346, width: 108, height: PLATFORM_HEIGHT }
+					];
+					powerups = [
+						{ x: 350, y: 376, width: 32, height: 32, type: 'speed' }
+					];
+					lockedDoors = [
+						{ x: 864, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 900, y: GROUND_Y - 72 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 936, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 900, y: GROUND_Y - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 828, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
+					];
+					keys = [
+						{ x: 750, y: 310, width: 36, height: 36 }
+					];
+					TOTAL_COINS = 4;
+				} else if (level === 8) {
+					enemies = [
+						{ x: 200, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 3, type: 'walker', facingRight: true, animationFrame: 0 },
+						{ x: 650, y: 350, width: 48, height: 48, speed: 4, type: 'flyer', baseY: 350, facingRight: true, animationFrame: 0 },
+						{ x: 900, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 0, type: 'shooter', shootTimer: 60 }
+					];
+					coins = [
+						{ x: 150, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 750, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }, // Ground coin
+						{ x: 1050, y: 230, width: 36, height: 36 } // Elevated coin
+					];
+					spikes = [
+						{ x: 450, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 600, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 850, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
+					];
+					boxes = [
+						{ x: 500, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36, broken: false }
+					];
+					platforms = [
+						{ x: 300, y: 426, width: 108, height: PLATFORM_HEIGHT },
+						{ x: 750, y: 346, width: 108, height: PLATFORM_HEIGHT },
+						{ x: 1000, y: 266, width: 108, height: PLATFORM_HEIGHT }
+					];
+					powerups = [
+						{ x: 750, y: 300, width: 32, height: 32, type: 'speed' }
+					];
+					lockedDoors = [
+						// Ground-level doors (around coin at x: 750)
+						{ x: 714, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 750, y: GROUND_Y - 72 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 786, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+						// Elevated doors (around coin at x: 1050, y: 230)
+						{ x: 1014, y: 230, width: 36, height: 36 },
+						{ x: 1050, y: 194, width: 36, height: 36 },
+						{ x: 1086, y: 230, width: 36, height: 36 }
+					];
+					keys = [
+						{ x: 350, y: 390, width: 36, height: 36 }, // First key (unlocks ground doors)
+						{ x: 900, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 } // Second key (unlocks elevated doors)
+					];
+					TOTAL_COINS = 4; // 3 coins + 1 from box
+				} else if (level === 9) {
+					enemies = [
+						{ x: 200, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 3, type: 'walker', facingRight: true, animationFrame: 0 },
+						{ x: 600, y: 350, width: 48, height: 48, speed: 4, type: 'flyer', baseY: 350, facingRight: true, animationFrame: 0 },
+						{ x: 900, y: GROUND_Y - 48 - GROUND_HEIGHT, width: 48, height: 48, speed: 0, type: 'shooter', shootTimer: 60 },
+						{ x: 1050, y: 230, width: 48, height: 48, speed: 3, type: 'jumper', jumpTimer: 45, vy: 0, facingRight: true, animationFrame: 0 }
+					];
+					coins = [
+						{ x: 150, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 450, y: 408, width: 36, height: 36 },
+						{ x: 750, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 1050, y: 230, width: 36, height: 36 }
+					];
+					spikes = [
+						{ x: 300, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 678, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 714, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 786, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 822, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 }
+					];
+					boxes = [
+						{ x: 900, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36, broken: false }
+					];
+					platforms = [
+						{ x: 400, y: 426, width: 72, height: PLATFORM_HEIGHT },
+						{ x: 600, y: 346, width: 72, height: PLATFORM_HEIGHT },
+						{ x: 850, y: 266, width: 72, height: PLATFORM_HEIGHT },
+						{ x: 1000, y: 266, width: 36, height: PLATFORM_HEIGHT }
+					];
+					powerups = [
+						{ x: 450, y: 376, width: 32, height: 32, type: 'speed' },
+						{ x: 650, y: GROUND_Y - 108 - GROUND_HEIGHT, width: 72, height: 72, type: 'killer' }
+					];
+					lockedDoors = [
+						{ x: 714, y: GROUND_Y - 72 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 750, y: GROUND_Y - 108 - GROUND_HEIGHT, width: 36, height: 36 },
+						{ x: 1014, y: 230, width: 36, height: 36 },
+						{ x: 1050, y: 194, width: 36, height: 36 },
+						{ x: 1086, y: 230, width: 36, height: 36 },
+						{ x: 600, y: 310, width: 36, height: 36 }
+					];
+					keys = [
+						{ x: 300, y: 390, width: 36, height: 36 }, // Unlocks ground doors
+						{ x: 650, y: 310, width: 36, height: 36 }, // Unlocks middle platform door
+						{ x: 900, y: GROUND_Y - 36 - GROUND_HEIGHT, width: 36, height: 36 } // Unlocks elevated doors
+					];
+					TOTAL_COINS = 5; // 4 coins + 1 from box
+				} else if (level === 10) {
+					boss = {
+						x: 550, y: GROUND_Y - 72 - GROUND_HEIGHT, width: 72, height: 72,
+						speed: 3, type: 'boss', jumpTimer: 60, vy: 0, hp: 10, facingRight: true, animationFrame: 0
+					};
+					enemies = [boss];
+					coins = [];
+					spikes = [];
+					boxes = [];
+					platforms = [
+						{ x: 200, y: 426, width: 108, height: PLATFORM_HEIGHT }, // Left
+						{ x: 546, y: 346, width: 108, height: PLATFORM_HEIGHT }, // Middle
+						{ x: 892, y: 426, width: 108, height: PLATFORM_HEIGHT }  // Right
+					];
+					powerups = [];
+					lockedDoors = [];
+					keys = [];
+					rocks = [];
+					powerupSpawnTimer = 0; 
+					TOTAL_COINS = 1;
+				}
+			}
 
             coinCount = 0;
             transitionFrames = 0;
